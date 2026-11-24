@@ -1,0 +1,56 @@
+# The bots' settings for this repository. Every TODO must be filled in.
+# A complete, working example: examples/markdown-runner/project.toml in the bots' repository.
+
+[project]
+# how the prompts name the project: "You are the coding bot of <description>."
+description = "the TODO repository (TODO: one line, e.g. a React UI for ...)"
+base = "main"
+# files a build leaves in the tree: the coder is told to delete them (the gate refuses binaries anyway)
+build_outputs = []
+
+[paths]
+# the bots can't touch these (.github/* and .bot/* are always protected)
+protected = ["LICENSE"]          # TODO: lock files, generated code, ...
+# a file is a test if it matches `tests`, code if it matches `code` and isn't a test (fnmatch: * crosses /)
+code = ["TODO/*.go"]
+tests = ["*_test.go"]
+
+# Run by the harness, as the sandboxed agent, after every coder round, in order. The first failure
+# goes back to the same coder session (twice at most). Keep it what CI runs, minus the slow parts.
+[[gate]]
+name = "TODO lint"
+run = "TODO"
+[[gate]]
+name = "TODO tests"
+run = "TODO"
+
+# The PR's tests run against the base branch's code: they must fail there, or they prove nothing.
+# `when` (optional): only if the PR changes a test matching one of these globs.
+[[without_change]]
+name = "TODO tests"
+run = "TODO"
+
+[agent]
+# commands the agent may run, on top of the read-only basics (ls, cat, grep, git diff, rm...).
+# Not a security boundary (a test can run anything): the sandbox user and the missing token are.
+allow = [
+    # "Bash(go:*)",
+    # "Bash(yarn:*)", "Bash(npx jest:*)",
+]
+# The agent's environment is EMPTY apart from these (no GitHub token). {home} = its throwaway home.
+# Paths outside {home} must be writable by the agent user: bot.yml creates /tmp/bot-cache.
+[agent.env]
+# GOMODCACHE = "/tmp/bot-cache/gomod"
+# npm_config_cache = "/tmp/bot-cache/npm"
+
+[review]
+# step 3 of the reviewer's method: how it exercises the change for real, not just reads it
+try_it = "TODO: e.g. build and run the CLI on inputs you write under /tmp, or write a throwaway test"
+# regexes over diff lines, flagged in the reviewer's automatic report (optional)
+removed_check = '^-\s*.*\b(assert|expect)\b'
+debug = '^\+.*(console\.log|\bTODO\b|\bFIXME\b|\bXXX\b)'
+
+[ci]
+# workflows the bot dispatches on its branches when its push didn't trigger them; each needs
+# `workflow_dispatch:` in its `on:`. Their checks are the CI the bot waits for.
+workflows = ["ci.yml", "codeql.yml"]
