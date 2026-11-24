@@ -121,5 +121,9 @@ check("config: gate from project.toml", [n for n, _ in bot.GATE][:3] == ["gofmt"
 check("config: agent env expands {home}", bot.agent_env("/h")["GOPATH"] == "/h/go")
 check("config: allowed commands added", "Bash(go:*)" in bot.CODER_TOOLS and "Bash(go:*)" in bot.REVIEWER_TOOLS)
 check("config: prompts name the project", "markdown-runner" in bot.CODER_SYSTEM and "mr-probe" in bot.REVIEWER_SYSTEM)
+_ms = [{"kind": "review"}] * 3 + [{"kind": "fix", "failing": ["x"]}] * 2 + [{"kind": "handover"}, {"kind": "address", "source": "human"}]
+check("a human review starts a new bot cycle", bot.budgets(_ms)["review_rounds"] == 0 and bot.budgets(_ms)["fix_rounds"] == 0
+      and bot.budgets(_ms)["human_rounds"] == 1)
+check("reviews still count within a cycle", bot.budgets(_ms + [{"kind": "review"}] * 2)["review_rounds"] == 2)
 check("protected glob", bot.protected(".github/workflows/x.yml") and not bot.protected("runner/x.go"))
 sys.exit(1 if FAILED else 0)
