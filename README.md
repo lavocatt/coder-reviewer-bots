@@ -39,7 +39,7 @@ team vote ──> coder bot ──> gate ──> CI + CodeQL ──> reviewer bo
 - **It stops itself** (`bot:stuck`):
   - per PR: 3 bot reviews, 4 CI fixes, 5 answers to humans, or the same CI failure twice;
   - cost: $15 a round, $50 per PR.
-  Remove the label to grant it the same budget again.
+  Remove the label to grant it the same budget again: that wakes the bot at once.
 
 The harness ([`bot/bot.py`](bot/bot.py): ~1400 lines of stdlib Python driving the `gh`, `git`, `openssl` and
 `claude` CLIs) is a stateless reconciler. Each
@@ -134,7 +134,7 @@ of `bot.py`.
 | `bot:todo` | queued; 👍 on the issue moves it up | label an issue to queue it |
 | `bot:doing` | the bots are iterating | nothing |
 | `bot:ready` | the bots agree, CI is green | review; comment to send it back to the coder; merge |
-| `bot:stuck` | a budget or the no-progress rule stopped it | read why (last bot comment), fix the issue or the harness, remove the label |
+| `bot:stuck` | a budget or the no-progress rule stopped it | read why (last bot comment), fix the issue or the harness, remove the label (the bot goes on at once) |
 
 The transcripts of every agent session are uploaded as a workflow artifact
 (`bot-transcripts-<run id>`).
