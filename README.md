@@ -52,6 +52,136 @@ run reads GitHub's state (labels, the `bot/review` commit status, `<!-- bot {...
 its comments), does the next actions and exits. No database, no server. It runs on issue and PR
 events, on comments, and hourly.
 
+## How the reviewer is kept honest
+
+A reviewer model can be lazy (it reads the diff and says "looks good"), or confidently wrong (it
+quotes an output it never produced). The harness doesn't trust its words. It checks what a script
+can check, and that overrides the model's verdict.
+
+### Probes: run it, quote the output
+
+The reviewer must *try* the change, not only read it. Each attempt is a **probe**, reported in its
+structured verdict:
+
+| Field | Meaning |
+|---|---|
+| `input` | what it ran: a command, a small input file, a throwaway test |
+| `got` | the output, **copied verbatim** from a command it ran |
+| `expected` | what the issue or the code's contract says should happen |
+| `ok` | its judgment: does `got` match `expected`? |
+| `case` | the unhappy path this probe demonstrates, if any (see below) |
+
+How the harness checks the probes:
+
+1. **Seen or invented.** Claude Code runs headless with `--output-format stream-json`, so the
+   harness captures the output of every command the reviewer actually ran. A probe is *verified*
+   only if its `got` appears in one of those outputs. Both sides are normalised first: colour codes
+   (with or without the ESC byte, since models drop it when copying), whitespace and surrounding
+   quotes are stripped. A `got` found nowhere makes the review **"unverifiable"**: changes requested.
+2. **Enough evidence.** When the PR changes code, the review needs at least **3 verified probes**.
+   The prompt asks for the issue's own case among them, but only the count is enforced. Otherwise it is an **"incomplete review"**: changes requested.
+3. **A wrong output blocks.** A probe with `ok: false` forces changes requested, with the input, the
+   output and the expected output, so the coder can fix it without guessing. The only exception is
+   a probe on a case that is a note for the human (next section).
+
+The review comment shows every probe in a table, with a "seen in output" column.
+
+### Unhappy paths: hunt what the coder didn't test
+
+A coder tests the happy path. The reviewer must list the **unhappy paths** of every changed
+function: near-miss inputs, empty, huge or odd inputs, errors, timeouts, missing files. For each one
+it says whether the case is `handled` and `tested`.
+- An **unhandled** case forces changes requested.
+- A handled but **untested** case gets a comment asking for the test.
+
+Two kinds of case are **notes for the human**, not changes, so the coder isn't sent to rewrite code
+outside the PR's scope:
+- `pre_existing`: the base branch already has the problem, in code the PR neither adds nor changes;
+- `limitation`: the PR deliberately leaves the case out of its own code and documents that (the
+  reviewer quotes where), and the issue doesn't ask for it.
+
+An undocumented gap is a real problem, not a limitation.
+
+### Pushback: a remark must be argued, not repeated
+
+The coder may refuse a remark with evidence: a run, a test, a line of code. The next review sees
+its own previous review and the coder's replies. For each remark the coder disputes, the reviewer
+has two options:
+- **concede**: drop it, re-file it as a note, or mark it `disputed` with no answer, which makes it a
+  "Not for this PR" note for the human;
+- **answer**: write a `rebuttal` *and*, for an unhandled case, show a verified probe **from this
+  round** that is wrong on that same case.
+
+Repeating the remark, or a rebuttal backed by a probe on another case, isn't an answer: the remark
+becomes a note. New problems block as usual. Without this rule, a reviewer can send the same
+remark back every round until the review budget runs out.
+
+### The PR's tests must fail without the PR
+
+A test that passes on the old code proves nothing about the new code. Before every review the
+harness builds a second worktree with the **PR's tests but the base branch's code**: every file
+matching `[paths] code`, and not a test, is reverted. It then runs the `[[without_change]]`
+commands there.
+- **They must fail.** A failure to compile counts, since the tests use what the PR adds.
+- If they all pass, that's a hard finding: *"The PR's tests also pass WITHOUT its code change"*.
+
+This is mutation testing applied to the PR. The base branch's code is the mutant, and the PR's
+tests must kill it.
+
+The same automatic report also flags:
+- protected files touched;
+- code changed with no test changed;
+- removed assertions (`[review] removed_check`);
+- debug leftovers (`[review] debug`).
+
+### What this doesn't prove
+
+- A verified probe proves the reviewer **saw** that output, not that its `ok` judgment is right.
+  That judgment is still the model's.
+- Reviewer and coder are the same model family: correlated blind spots remain. A human still
+  reviews before merging.
+- The checks don't measure how deep the review went. Three trivial probes pass.
+
+## Testing the harness
+
+The harness is code that judges code, so it is tested like code.
+
+```sh
+python3 bot/test_bot.py    # offline checks of the pure logic, no GitHub, no model: < 1 s
+python3 bot/mutants.py     # mutation checks of those tests: ~1 s
+```
+
+`test_bot.py` covers the decisions (what to do next on each PR state), budgets, the queue, probe
+verification, notes and pushback, the automatic report, and the settings loaded from
+`project.toml`.
+
+**Mutants prove the tests guard the rules.** A passing test suite says nothing about whether it
+would catch a broken rule. `mutants.py` breaks one rule at a time on purpose, in a throwaway copy of
+`bot.py`, and runs the tests:
+
+| Verdict | Meaning |
+|---|---|
+| **killed** | the tests fail: the rule is guarded |
+| **SURVIVED** | the tests still pass with the rule broken: a missing test |
+| **STALE** | the code the mutant targets moved: update the mutant |
+
+The 17 mutants cover:
+- the reviewer: an invented output accepted, fewer than 3 probes, colour codes breaking the match,
+  wrong probes or unhandled cases not blocking, a rebuttal without evidence;
+- the PR's tests: tests passing on the old code, code changed without tests;
+- the bots' limits: protected paths, the dollar cap, the same failure twice, the review budget,
+  budgets after `bot:stuck` and after a human review;
+- the human's priority: a human remark first, no bot work on a PR handed over.
+
+When the mutants were first added, two of them survived: nothing tested the 3-probe minimum or the
+code-without-tests rule. The tests were added before the mutants were committed.
+
+**When you change a rule, add its mutant.** One line of `bot.py` and a broken version of it, plus a
+test that kills it. A rule with no mutant is a rule nobody has proven the tests guard.
+
+Not covered (they call GitHub): that the reviewer never APPROVES, label changes, and pushes. Those are
+checked on real runs.
+
 ## What it costs
 
 Every coder round and review posts its cost on the PR. `bot:ready` comes with a ledger: rounds,
@@ -146,7 +276,8 @@ The transcripts of every agent session are uploaded as a workflow artifact
 
 ## Updating
 
-Run `./install.sh` again: it refreshes `bot.py` and its tests and keeps your settings. The copy in
+Run `./install.sh` again: it refreshes `bot.py` and its tests and keeps your settings. Before you
+change the harness, run `python3 bot/test_bot.py` and `python3 bot/mutants.py` in this repository. The copy in
 your repository is the one that runs, and it changes only through a reviewed PR. Treat the harness
 like product code: the team owns it.
 

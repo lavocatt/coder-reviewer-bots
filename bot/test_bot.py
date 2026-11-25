@@ -174,6 +174,15 @@ check("no previous review, no previous round", bot.previous_round([], [], "rev[b
 check("the reviewer is told about pushback, the coder that it may push back",
       "`rebuttal`" in bot.REVIEWER_SYSTEM and "push back" in open(bot.__file__).read())
 
+out = bot.enforce({"verdict": "ready", "summary": "s", "unhappy": [], "probes": GOOD[:2]}, [], RUNS, code_changed=True)
+check("fewer than 3 verified probes of changed code: incomplete review",
+      out["verdict"] == "changes" and says(out, "fewer than 3 verified probes"))
+check("…but enough when no code changed",
+      bot.enforce({"verdict": "ready", "summary": "s", "unhappy": [], "probes": GOOD[:2]}, [], RUNS, code_changed=False)["verdict"] == "ready")
+_rep = {"protected_touched": [], "code_touched": ["runner/x.go"], "tests_touched": [], "without_change": {"checked": False}}
+check("code changed without any test: a hard finding", any("no test" in h for h in bot.hard_findings(_rep)))
+check("code changed with a test: none", bot.hard_findings({**_rep, "tests_touched": ["runner/x_test.go"]}) == [])
+
 s, m = bot.parse_final("blah\nSUBJECT: warn on unreachable breakpoint\nSUMMARY: did it.\nmore")
 check("parse_final", s == "warn on unreachable breakpoint" and m.startswith("did it."))
 check("legacy and current markers", bot.MARK.search('<!-- mr-bot {"kind": "a"} -->') and bot.MARK.search('<!-- bot {"kind": "b"} -->'))
