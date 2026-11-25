@@ -212,6 +212,22 @@ check("old-code line: e2e only, not checkable, said so",
           {"checked": False, "why": "the PR's tests run in CI only (e2e): not checkable here", "ci_only": ["e2e/a.spec.ts"]})
       and "`e2e/a.spec.ts`" in bot.old_code_line({"checked": False, "why": "x", "ci_only": ["e2e/a.spec.ts"]}))
 
+# Per-check timeouts: a timeout is reported, never a crash, and proves nothing on the old code
+import subprocess  # noqa: E402
+import tempfile as _tf  # noqa: E402
+_h = _tf.mkdtemp()
+bot.TIMEOUT_MIN[("gate", "slow")] = 0.01
+_nap = f"sleep {30 + os.getpid() % 1000 / 1000:.3f}"  # a command line only this run has
+_t0 = bot.time.monotonic()
+_ok, _out = bot.run_check("gate", "slow", ["sh", "-c", f"echo started; {_nap} & {_nap}; wait"], _h, _h)
+_took = bot.time.monotonic() - _t0
+check("a check over its timeout: None, said so, its output kept", _ok is None and "timed out after 0.01 min" in _out
+      and "started" in _out)
+_left = subprocess.run(["pgrep", "-fx", _nap], capture_output=True, text=True).stdout.split()
+check("…and its whole process tree is killed, at once", _left == [] and _took < 10)
+check("a passing check", bot.run_check("gate", "fast", ["sh", "-c", "true"], _h, _h)[0] is True)
+check("a failing check, with its output", bot.run_check("gate", "fast", ["sh", "-c", "echo boom; false"], _h, _h) == (False, "boom\n"))
+
 s, m = bot.parse_final("blah\nSUBJECT: warn on unreachable breakpoint\nSUMMARY: did it.\nmore")
 check("parse_final", s == "warn on unreachable breakpoint" and m.startswith("did it."))
 check("legacy and current markers", bot.MARK.search('<!-- mr-bot {"kind": "a"} -->') and bot.MARK.search('<!-- bot {"kind": "b"} -->'))

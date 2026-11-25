@@ -91,7 +91,7 @@ HUMAN_ROUNDS = 5  # answers to human reviews per PR
 GATE_RETRIES = 2  # the same coder session is resumed with the gate's failure
 MAX_DIFF_LINES = int(os.environ.get("BOT_MAX_DIFF_LINES", "800"))
 MAX_ACTIONS = 12
-CI_WAIT = 30 * 60
+CI_WAIT = int(os.environ.get("BOT_CI_WAIT_MIN", "30")) * 60  # per wait; a slow CI (Maven, e2e) needs more
 
 PROTECTED = (".github/*", ".bot/*", *PROJECT["paths"].get("protected", []))
 # `mr-bot`: the markers of the pilot's first PRs
@@ -792,6 +792,29 @@ def protected(path: str) -> bool:
 
 
 GATE = [(g["name"], ["sh", "-c", g["run"]]) for g in PROJECT["gate"]]
+# per command, in minutes: `timeout_min` in [[gate]] / [[without_change]] (a Maven build needs more)
+TIMEOUT_MIN = {
+    (kind, g["name"]): float(g.get("timeout_min", 20)) for kind in ("gate", "without_change") for g in PROJECT.get(kind, [])
+}
+
+
+def run_check(kind: str, name: str, cmd: list[str], home: str, cwd: str) -> tuple[bool | None, str]:
+    """(passed, output) of one configured check, as the agent; passed is None on a timeout."""
+    minutes = TIMEOUT_MIN.get((kind, name), 20)
+    p = subprocess.Popen(
+        as_agent(cmd, home), cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True
+    )
+    try:
+        out, _ = p.communicate(timeout=minutes * 60)
+    except subprocess.TimeoutExpired:
+        # the whole tree: a build's forked JVMs or test servers must not outlive their check
+        if AGENT_USER:
+            subprocess.run(["sudo", "-n", "pkill", "-KILL", "-u", AGENT_USER], check=False)
+        else:
+            os.killpg(p.pid, 9)
+        out, _ = p.communicate()
+        return None, f"{(out or '')[-4000:]}\n[timed out after {minutes:g} min: raise `timeout_min` for this check]"
+    return p.returncode == 0, out
 
 
 def gate(t: Tree) -> str | None:
@@ -816,9 +839,9 @@ def gate(t: Tree) -> str | None:
     give_to_agent(t.dir)
     try:
         for name, cmd in GATE:
-            p = subprocess.run(as_agent(cmd, home), cwd=t.dir, capture_output=True, text=True, timeout=1200)
-            if p.returncode:
-                return f"`{name}` fails:\n```\n{(p.stdout + p.stderr)[-6000:]}\n```"
+            ok, out = run_check("gate", name, cmd, home, t.dir)
+            if not ok:
+                return f"`{name}` {'fails' if ok is False else 'timed out'}:\n```\n{out[-6000:]}\n```"
     finally:
         take_back(t.dir)
     return None
@@ -1330,13 +1353,19 @@ def without_change(t: Tree) -> dict:
         }
         if not runs:
             return {"checked": False, "why": "no [[without_change]] check applies"}
-        res = {}
-        for name, cmd in runs.items():
-            p = subprocess.run(as_agent(cmd, home), cwd=old.dir, capture_output=True, text=True, timeout=1200)
-            res[name] = p.returncode == 0
+        res = {name: run_check("without_change", name, cmd, home, old.dir)[0] for name, cmd in runs.items()}
     finally:
         old.close()
-    return {"checked": True, "ci_only": ci_only, "pass_on_old_code": [k for k, ok in res.items() if ok], "fail_on_old_code": [k for k, ok in res.items() if not ok]}
+    timed_out = [k for k, ok in res.items() if ok is None]
+    if len(timed_out) == len(res):  # a timeout proves nothing either way
+        return {"checked": False, "why": "timed out: " + ", ".join(timed_out), "ci_only": ci_only}
+    return {
+        "checked": True,
+        "ci_only": ci_only,
+        "pass_on_old_code": [k for k, ok in res.items() if ok is True],
+        "fail_on_old_code": [k for k, ok in res.items() if ok is False],
+        "timed_out": timed_out,
+    }
 
 
 def old_code_line(wc: dict) -> str:

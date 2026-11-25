@@ -153,7 +153,7 @@ The harness is code that judges code, so it is tested like code.
 
 ```sh
 python3 bot/test_bot.py    # offline checks of the pure logic, no GitHub, no model: < 1 s
-python3 bot/mutants.py     # mutation checks of those tests: ~1 s
+python3 bot/mutants.py     # mutation checks of those tests: under a minute
 ```
 
 CI runs both on every push and PR (Python 3.11 and 3.13), and installs the bots into a scratch
@@ -173,10 +173,11 @@ would catch a broken rule. `mutants.py` breaks one rule at a time on purpose, in
 | **SURVIVED** | the tests still pass with the rule broken: a missing test |
 | **STALE** | the code the mutant targets moved: update the mutant |
 
-The 20 mutants cover:
+The 21 mutants cover:
 - the reviewer: an invented output accepted, fewer than 3 probes, colour codes breaking the match,
   wrong probes or unhandled cases not blocking, a rebuttal without evidence;
 - the PR's tests: tests passing on the old code, code changed without tests;
+- a timed-out check leaving its processes running;
 - CI failures: a test renamed when its line moves, failures named per job again, the old-code
   check silent about what it didn't run;
 - the bots' limits: protected paths, the dollar cap, the same failure twice, the review budget,
@@ -238,6 +239,7 @@ Check the install with `python3 .bot/test_bot.py`.
 |---|---|
 | [`examples/markdown-runner/`](examples/markdown-runner) | Go CLI, **run for real** (the pilot) |
 | [`examples/typescript-react/`](examples/typescript-react) | React + TypeScript, Jest in the gate, Playwright e2e in CI: **untested sketch** |
+| [`examples/artemis/`](examples/artemis) | Apache Artemis fork (Java, Maven, ~40 modules): builds only the changed modules; **script and patterns tested on a real checkout, no bot run yet** |
 
 The template's comments give `failure_patterns` for Go, Jest, Playwright and pytest. For a
 compiled language, point its package cache at `/tmp/bot-cache` in `[agent.env]`, for example
@@ -293,6 +295,7 @@ Repository variables, all optional:
 | `BOT_MAX_USD_PER_PR` | `50` | then `bot:stuck`; counted since the last stuck |
 | `BOT_MAX_DIFF_LINES` | `800` | added + deleted lines vs the base branch; for reference, Google's [Small CLs](https://google.github.io/eng-practices/review/developer/small-cls.html) calls ~100 reasonable, 1000 too large |
 | `BOT_HUMANS` | repo owner | comma-separated logins asked to review |
+| `BOT_CI_WAIT_MIN` | `30` | how long one wait for CI lasts; raise it for a slow CI (Maven, e2e) |
 
 The round budgets (3 reviews, 4 CI fixes, 5 human rounds, 2 PRs in flight) are constants at the top
 of `bot.py`.

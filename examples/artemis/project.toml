@@ -1,0 +1,55 @@
+# Apache Artemis (Maven, ~40 modules, JDK 25 to build), on a fork: the bots work the fork's GitHub
+# issues and open PRs on the fork only. Never point them at apache/artemis.
+# PARTLY TESTED: mvn-changed.sh and the failure pattern ran on a real Artemis checkout; no bot has
+# run this config end to end yet (see README.md next to it).
+
+[project]
+description = "a fork of Apache Artemis, the message broker (Java, Maven)"
+base = "main"
+build_outputs = []          # Maven writes to target/, which .gitignore already covers
+
+[paths]
+# the build and the project's own rules: a human changes those
+protected = ["pom.xml", "*/pom.xml", "LICENSE", "NOTICE", "AGENTS.md", ".mvn/*", "etc/*"]
+code = ["*/src/main/*"]
+tests = ["*/src/test/*", "tests/*"]
+# smoke and soak tests start brokers and distributions: CI's job, not a scratch worktree's
+ci_only_tests = ["tests/smoke-tests/*", "tests/soak-tests/*", "tests/e2e-tests/*", "tests/performance-tests/*"]
+
+# Only the modules the change touches, and what they need: .bot/mvn-changed.sh (in this example).
+# One Maven run: compile, Checkstyle and license headers (-Pdev), then the changed test classes.
+[[gate]]
+name = "build and the changed tests"
+run = "sh .bot/mvn-changed.sh tests"
+timeout_min = 40
+
+# The PR's test classes on the base branch's code: they must fail there (a compile error counts).
+[[without_change]]
+name = "the PR's test classes"
+run = "sh .bot/mvn-changed.sh tests"
+timeout_min = 40
+
+[agent]
+allow = [
+    "Bash(mvn:*)",
+    "Bash(sh .bot/mvn-changed.sh:*)",
+    "Bash(java:*)",
+    "Bash(git blame:*)",
+]
+[agent.env]
+# MAVEN_ARGS (Maven 3.9+) goes on every mvn command line: one local repository for every worktree
+MAVEN_ARGS = "-Dmaven.repo.local=/tmp/bot-cache/m2"
+
+[review]
+try_it = """write a throwaway JUnit 5 test next to the changed code, extending ActiveMQTestBase \
+(createServer(), createInVMNonHALocator()), and run it with `sh .bot/mvn-changed.sh tests` or \
+`mvn -B -ntp -pl <module> -am verify -Dtest=<Class> -Dsurefire.failIfNoSpecifiedTests=false`. \
+Probe protocol edge cases, restarts, paging and limits, concurrent consumers, and bad configuration"""
+removed_check = '^-\s*.*\b(assert[A-Z]\w*\(|Wait\.assert\w*\(|fail\()'
+debug = '^\+.*(System\.(out|err)\.print|\.printStackTrace\(\)|logger\.info\(|Thread\.sleep\(|\bTODO\b|\bFIXME\b)'
+
+[ci]
+# the fork's own build.yml (3 JDKs, fast tests: up to an hour) and a CodeQL workflow (this example's)
+workflows = ["build.yml", "codeql.yml"]
+# surefire 3: « [ERROR] org.apache...FooTest.testBar -- Time elapsed: 0.010 s <<< FAILURE! »
+failure_patterns = ['^\[ERROR\] (\S+) -- Time elapsed: \S+ s <<< (?:FAILURE|ERROR)!$']

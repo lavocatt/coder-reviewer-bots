@@ -71,6 +71,11 @@ MUTANTS = [
         'line = f"Old-code check: not run ({wc.get(\'why\', \'?\')})."',
         'line = ""',
     ),
+    (
+        "a timed-out check leaves its processes running (a build's forked JVMs)",
+        "            os.killpg(p.pid, 9)",
+        "            p.kill()",
+    ),
     # the PR's tests must prove something
     (
         "tests that pass on the old code are accepted",

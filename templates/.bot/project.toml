@@ -19,6 +19,7 @@ ci_only_tests = []               # e.g. ["e2e/*"]
 
 # Run by the harness, as the sandboxed agent, after every coder round, in order. The first failure
 # goes back to the same coder session (twice at most). Keep it what CI runs, minus the slow parts.
+# Each check gets 20 min; `timeout_min = 40` on one raises it (its whole process tree is killed after).
 [[gate]]
 name = "TODO lint"
 run = "TODO"
