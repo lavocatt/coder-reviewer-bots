@@ -151,6 +151,9 @@ python3 bot/test_bot.py    # offline checks of the pure logic, no GitHub, no mod
 python3 bot/mutants.py     # mutation checks of those tests: ~1 s
 ```
 
+CI runs both on every push and PR (Python 3.11 and 3.13), and installs the bots into a scratch
+repository: the templates' TODOs must stop the bot, and the installed tests must pass.
+
 `test_bot.py` covers the decisions (what to do next on each PR state), budgets, the queue, probe
 verification, notes and pushback, the automatic report, and the settings loaded from
 `project.toml`.

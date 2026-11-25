@@ -1,0 +1,42 @@
+# The harness's own checks: its tests, the mutants that prove the tests guard its rules, and an
+# install into a scratch repository.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.13"]   # 3.11: the oldest with tomllib
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Tests
+        run: python3 bot/test_bot.py
+      - name: Mutants
+        run: python3 bot/mutants.py
+      - name: Install into a scratch repository
+        run: |
+          r=$(mktemp -d) && git init -q "$r"
+          ./install.sh "$r"
+          # the templates' TODOs stop the bot at once
+          if (cd "$r" && python3 -c 'import sys; sys.path.insert(0, ".bot"); import bot' 2>"$r/err.txt"); then
+            echo "the bot started with an unfilled project.toml"; exit 1
+          fi
+          grep -q "TODO values" "$r/err.txt"
+          # with a filled one, its tests pass where it is installed
+          cp examples/markdown-runner/project.toml "$r/.bot/"
+          python3 "$r/.bot/test_bot.py" >/dev/null
+          python3 -m pip install -q pyyaml
+          python3 -c 'import yaml, sys; [yaml.safe_load(open(f)) for f in sys.argv[1:]]' "$r"/.github/workflows/*.yml
