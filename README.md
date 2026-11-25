@@ -31,9 +31,14 @@ team vote ──> coder bot ──> gate ──> CI + CodeQL ──> reviewer bo
   paths and *runs* the code (`[review] try_it`). The harness checks its review:
   - the PR's tests must fail on the base branch's code (`[[without_change]]`), or they prove nothing;
   - the outputs it quotes must appear in the commands it actually ran;
-  - an unhandled unhappy path forces "changes requested".
+  - an unhandled unhappy path, or a wrong probe, forces "changes requested", except for notes left
+    to the human: a problem the base branch already has, or a limitation the PR documents.
   It posts REQUEST_CHANGES or COMMENT, never APPROVE: an approval would count toward branch
   protection.
+- **Pushback**: the coder may refuse a remark, with evidence. The reviewer sees its previous review
+  and the coder's reply. A disputed remark blocks again only if the reviewer answers the argument
+  with a probe from this round that shows it wrong. Otherwise it becomes a "Not for this PR" note
+  for the human. Repeating the remark is not an answer.
 - **Humans**: when the bots agree, the PR is labelled `bot:ready` and a review is requested from
   `BOT_HUMANS`. A collaborator's comment on the PR starts a new coder round.
 - **It stops itself** (`bot:stuck`):

@@ -113,6 +113,67 @@ raw3 = ["\x1b[30;46m\x1b[30;46m INFO \x1b[0m\x1b[0m \x1b[96m\x1b[96m/tmp/rv1/d/a
 check("probe copied with bare colour codes is verified",
       all(p["verified"] for p in bot.enforce(m3, [], raw3, code_changed=False)["probes"]))
 check("[Yes/no] is not a colour code", "[Yes/no/continue/quit]" in bot._norm("[95m[Yes/no/continue/quit][0m"))
+# Notes for the human and the coder's pushback
+RUNS = ["OK one", "two", "three", "-2"]
+GOOD = [{"input": "a", "got": "OK one", "ok": True}, {"input": "b", "got": "two", "ok": True},
+        {"input": "c", "got": "three", "ok": True}]
+
+
+def rv(unhappy, probes=()):
+    return bot.enforce({"verdict": "ready", "summary": "s", "unhappy": unhappy, "probes": GOOD + list(probes)},
+                       [], RUNS, code_changed=True)
+
+
+def wrong(case=""):
+    return {"input": "-1", "got": "-2", "ok": False, "case": case}
+
+
+def says(out, words):
+    return any(words in c["body"] for c in out["comments"])
+
+
+OLD = {"case": "Crash on  empty input", "handled": False, "tested": False, "pre_existing": True}
+LIM = {"case": "huge files", "handled": False, "tested": False, "limitation": True, "note": "README: < 1 MB"}
+out = rv([OLD], [wrong("  crash on empty INPUT ")])
+check("pre-existing case and its wrong probe: a note, ready (case copied loosely)",
+      out["verdict"] == "ready" and says(out, "Not for this PR (the base branch already has it)"))
+out = rv([LIM], [wrong("huge files")])
+check("documented limitation and its probe: a note, ready", out["verdict"] == "ready" and says(out, "deliberate limitation"))
+check("a pre-existing case handled and tested is no note", not says(rv([{**OLD, "handled": True, "tested": True}]), "Not for this PR"))
+check("a wrong probe naming no case still blocks", rv([OLD], [wrong()])["verdict"] == "changes")
+check("a wrong probe on a case that is no note still blocks",
+      rv([OLD, {"case": "nil", "handled": True, "tested": True}], [wrong("nil")])["verdict"] == "changes")
+DIS = {"case": "a 20k-char line", "handled": False, "tested": False, "disputed": True}
+out = rv([DIS], [wrong(DIS["case"])])
+check("disputed and not answered: a note for the human, its probe too",
+      out["verdict"] == "ready" and says(out, "the coder disputed it, the review doesn't answer"))
+SAID = {**DIS, "rebuttal": "still wrong, as I said"}
+check("repeating the remark is no answer", rv([SAID])["verdict"] == "ready")
+out = rv([SAID], [wrong(SAID["case"])])
+check("a rebuttal with this round's wrong probe: changes, the answer shown",
+      out["verdict"] == "changes" and says(out, "Unhandled unhappy path: a 20k-char line")
+      and says(out, "the review answers: still wrong"))
+out = rv([SAID], [{**wrong(SAID["case"]), "got": "trust me, it breaks"}])
+check("a paraphrased probe is no answer (and voids the review as before)",
+      says(out, "the review doesn't answer") and says(out, "Unverifiable review"))
+out = rv([SAID], [wrong("another case")])
+check("a rebuttal backed by a wrong probe on ANOTHER case is no answer to this one",
+      says(out, "the review doesn't answer") and not says(out, "Unhandled unhappy path: a 20k-char line"))
+check("a new unhandled case still blocks", rv([{"case": "nil", "handled": False, "tested": False}])["verdict"] == "changes")
+
+prev = bot.previous_round(
+    [{"user": {"login": "rev[bot]"}, "state": "CHANGES_REQUESTED", "submitted_at": "2026-11-25T10:00:00Z", "body": "OLD"},
+     {"user": {"login": "rev[bot]"}, "state": "DISMISSED", "submitted_at": "2026-11-25T11:00:00Z", "body": "BODY-42"},
+     {"user": {"login": "alice"}, "state": "COMMENTED", "submitted_at": "2026-11-25T13:00:00Z", "body": "HUMAN"}],
+    [{"user": {"login": "cod[bot]"}, "created_at": "2026-11-25T10:30:00Z", "body": "BEFORE"},
+     {"user": {"login": "cod[bot]"}, "created_at": "2026-11-25T12:00:00Z", "body": "I disagree: run 3 <!-- bot {\"kind\": \"address\"} -->"}], reviewer="rev[bot]", coder="cod[bot]")
+check("previous round: the reviewer's last review and the coder's replies since, markers stripped",
+      "BODY-42" in prev and "I disagree: run 3" in prev and "OLD" not in prev and "BEFORE" not in prev
+      and "HUMAN" not in prev and "<!--" not in prev)
+check("no previous review, no previous round", bot.previous_round([], [], "rev[bot]", "cod[bot]") == "")
+check("the reviewer is told about pushback, the coder that it may push back",
+      "`rebuttal`" in bot.REVIEWER_SYSTEM and "push back" in open(bot.__file__).read())
+
 s, m = bot.parse_final("blah\nSUBJECT: warn on unreachable breakpoint\nSUMMARY: did it.\nmore")
 check("parse_final", s == "warn on unreachable breakpoint" and m.startswith("did it."))
 check("legacy and current markers", bot.MARK.search('<!-- mr-bot {"kind": "a"} -->') and bot.MARK.search('<!-- bot {"kind": "b"} -->'))
