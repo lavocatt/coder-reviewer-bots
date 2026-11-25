@@ -14,6 +14,8 @@ protected = ["LICENSE"]          # TODO: lock files, generated code, ...
 # a file is a test if it matches `tests`, code if it matches `code` and isn't a test (fnmatch: * crosses /)
 code = ["TODO/*.go"]
 tests = ["*_test.go"]
+# tests that need a deployed app (e2e, Playwright...): CI runs them, the old-code check can't
+ci_only_tests = []               # e.g. ["e2e/*"]
 
 # Run by the harness, as the sandboxed agent, after every coder round, in order. The first failure
 # goes back to the same coder session (twice at most). Keep it what CI runs, minus the slow parts.
@@ -54,3 +56,10 @@ debug = '^\+.*(console\.log|\bTODO\b|\bFIXME\b|\bXXX\b)'
 # workflows the bot dispatches on its branches when its push didn't trigger them; each needs
 # `workflow_dispatch:` in its `on:`. Their checks are the CI the bot waits for.
 workflows = ["ci.yml", "codeql.yml"]
+# regexes whose first group names a failing test in a failed job's log, so that two different
+# failures of the same job (an e2e suite) aren't taken for « the same failure twice ». None: job names.
+#   Go:         '^\s*--- FAIL: (\S+)'
+#   Jest:       '^\s*● (.+)$'
+#   Playwright: '^\s+\d+\) (\[[^\]]+\] › .+?)\s*─*$'
+#   pytest:     '^FAILED (\S+)'
+failure_patterns = []

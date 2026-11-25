@@ -307,6 +307,44 @@ def ci_state(sha: str) -> tuple[str, list[dict]]:
     return ("failure" if failed else "success"), failed
 
 
+def job_log(job_id) -> str:
+    p = subprocess.run(
+        ["gh", "api", f"repos/{REPO}/actions/jobs/{job_id}/logs"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "GH_TOKEN": CODER.token()},
+    )
+    return p.stdout if p.returncode == 0 else ""
+
+
+# `[ci] failure_patterns`: regexes whose first group names a failing test or scenario in a job's log
+FAILURE_PATTERNS = [re.compile(x, re.M) for x in PROJECT["ci"].get("failure_patterns", [])]
+LOG_STAMP = re.compile(r"^\d{4}-\d\d-\d\dT[\d:.]+Z ?", re.M)  # GitHub's prefix on every log line
+# what differs between a branch and the base for the same test: line:column, durations
+VOLATILE = re.compile(r":\d+(?::\d+)?\b|\s*\(\d+(?:\.\d+)?\s*m?s\)")
+
+
+def scenarios(log: str) -> set[str]:
+    """The failing tests a job's log names, by `[ci] failure_patterns`. Line numbers and durations are
+    dropped: the same failing test must keep its name across rounds."""
+    text = ANSI.sub("", LOG_STAMP.sub("", log or ""))
+    out = set()
+    for pat in FAILURE_PATTERNS:
+        for m in pat.finditer(text):
+            name = re.sub(r"\s+", " ", VOLATILE.sub("", m.group(1))).strip(" ─-")
+            if name:
+                out.add(name)
+    return out
+
+
+def failure_names(job: str, log: str) -> set[str]:
+    """« job: test » per failing test the log names; the job's name alone when it names none (a crash,
+    a build error, no pattern for it). Two fixes on DIFFERENT failing tests of the same job (an e2e
+    suite) are progress, not « the same failure twice »."""
+    names = scenarios(log)
+    return {f"{job}: {n}" for n in sorted(names)[:20]} if names else {job}
+
+
 def codeql_new_alerts(branch: str) -> list[str]:
     """Open CodeQL alerts on the branch that main doesn't have (rule + file)."""
 
@@ -369,7 +407,7 @@ def pr_facts(pr: dict) -> dict:
     alerts = codeql_new_alerts(branch) if state == "success" else []
     if alerts:
         state = "failure"
-    failing = sorted({r["name"] for r in failed} | set(alerts))
+    failing = sorted(set().union(*[failure_names(r["name"], job_log(r["id"])) for r in failed]) | set(alerts))
     return {
         "number": pr["number"],
         "sha": sha,
@@ -1028,9 +1066,7 @@ class Actions:
         try:
             logs = []
             for run in f.get("failed_runs", []):
-                out = subprocess.run(
-                    ["gh", "api", f"repos/{REPO}/actions/jobs/{run['id']}/logs"], capture_output=True, text=True
-                ).stdout
+                out = job_log(run["id"])
                 logs.append(f"### {run['name']}\n```\n{out[-7000:]}\n```")
             alerts = "\n".join(f"- {x}" for x in f.get("alerts", []))
             n = issue_of(pr)
@@ -1128,7 +1164,7 @@ class Actions:
                 )
                 return
             out = enforce(out, hard, res["tool_outputs"], code_changed=bool(rep["code_touched"]))
-            body = render(out) + f"\n\n<sub>Reviewer: Claude Code `{REVIEW_MODEL}`, {stats_line(res['stats'])}.</sub>"
+            body = render(out) + f"\n\n{old_code_line(rep['without_change'])}\n\n<sub>Reviewer: Claude Code `{REVIEW_MODEL}`, {stats_line(res['stats'])}.</sub>"
             ready = out["verdict"] == "ready"
             # only the latest bot review counts: earlier change requests are dismissed, not left blocking
             if two_bots():
@@ -1273,6 +1309,11 @@ def without_change(t: Tree) -> dict:
     tests = [x for x in changed if is_test(x)]
     if not code or not tests:
         return {"checked": False, "why": "no code changed" if not code else "no test changed"}
+    # tests that need a deployed app (e2e): CI runs them, a scratch worktree can't
+    ci_only = [x for x in tests if _matches(x, PROJECT["paths"].get("ci_only_tests", []))]
+    tests = [x for x in tests if x not in ci_only]
+    if not tests:
+        return {"checked": False, "why": "the PR's tests run in CI only (e2e): not checkable here", "ci_only": ci_only}
     old = Tree(t.git("rev-parse", "HEAD").stdout.strip())
     try:
         for x in code:
@@ -1295,7 +1336,22 @@ def without_change(t: Tree) -> dict:
             res[name] = p.returncode == 0
     finally:
         old.close()
-    return {"checked": True, "pass_on_old_code": [k for k, ok in res.items() if ok], "fail_on_old_code": [k for k, ok in res.items() if not ok]}
+    return {"checked": True, "ci_only": ci_only, "pass_on_old_code": [k for k, ok in res.items() if ok], "fail_on_old_code": [k for k, ok in res.items() if not ok]}
+
+
+def old_code_line(wc: dict) -> str:
+    """For the human, in every review: what the old-code check proved, or why it didn't run."""
+    if not wc.get("checked"):
+        line = f"Old-code check: not run ({wc.get('why', '?')})."
+    elif wc.get("fail_on_old_code"):
+        line = "Old-code check: the PR's tests fail on the base branch's code (" + ", ".join(wc["fail_on_old_code"]) + ") ✅"
+        if wc.get("pass_on_old_code"):
+            line += "; they pass there: " + ", ".join(wc["pass_on_old_code"])
+    else:
+        line = "Old-code check: the PR's tests also pass on the base branch's code ❌"
+    if wc.get("ci_only"):
+        line += " CI only (e2e): " + ", ".join(f"`{x}`" for x in wc["ci_only"][:5])
+    return line
 
 
 def hard_findings(rep: dict) -> list[str]:

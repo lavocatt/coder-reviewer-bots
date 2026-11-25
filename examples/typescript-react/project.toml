@@ -1,0 +1,62 @@
+# UNTESTED SKETCH: a React + TypeScript UI with Jest unit tests and Playwright e2e in CI.
+# Written from the markdown-runner example, never run by the bots. Expect to adjust it on a first
+# pilot (see README.md next to it).
+
+[project]
+description = "the <name> repository (a React + PatternFly UI in TypeScript)"
+base = "main"
+build_outputs = ["dist", "playwright-report", "test-results"]
+
+[paths]
+protected = ["package.json", "yarn.lock", "LICENSE"]
+code = ["src/*.ts", "src/*.tsx"]
+# snapshots are tests: if they counted as code, the old-code check would revert them
+tests = ["*.test.ts", "*.test.tsx", "*/__tests__/*", "*/__snapshots__/*", "e2e/*"]
+# Playwright needs a running app: CI runs it, the old-code check can't
+ci_only_tests = ["e2e/*"]
+
+# Every round starts from a fresh worktree: node_modules is installed each time (from the cache).
+[[gate]]
+name = "install"
+run = "yarn install --frozen-lockfile --prefer-offline"
+[[gate]]
+name = "lint"
+run = "yarn lint"
+[[gate]]
+name = "typecheck"
+run = "yarn tsc --noEmit"
+[[gate]]
+name = "unit"
+run = "yarn jest --ci"
+
+[[without_change]]
+name = "unit"
+run = "yarn install --frozen-lockfile --prefer-offline && yarn jest --ci"
+
+[agent]
+allow = [
+    "Bash(yarn:*)",
+    "Bash(npx jest:*)",
+    "Bash(npx tsc:*)",
+    "Bash(npx playwright:*)",
+    "Bash(node:*)",
+]
+[agent.env]
+YARN_CACHE_FOLDER = "/tmp/bot-cache/yarn"
+npm_config_cache = "/tmp/bot-cache/npm"
+CI = "true"
+
+[review]
+try_it = """write a throwaway *.test.tsx that renders the changed component with React Testing \
+Library (user-event for clicks and typing) and run it with `yarn jest <file>`, or a small \
+`node` script for pure logic. Probe what a user can do wrong: empty fields, long text, double \
+clicks, a failed request"""
+removed_check = '^-\s*.*\b(expect\(|assert)'
+debug = '^\+.*(console\.(log|debug)\(|\bdebugger\b|\bit\.only\(|\bdescribe\.only\(|\bTODO\b|\bFIXME\b)'
+
+[ci]
+workflows = ["ci.yml", "e2e.yml", "codeql.yml"]
+failure_patterns = [
+    '^\s*● (.+)$',                               # Jest: ● Suite › test
+    '^\s+\d+\) (\[[^\]]+\] › .+?)\s*─*$',        # Playwright: 1) [chromium] › e2e/a.spec.ts:12:5 › test
+]

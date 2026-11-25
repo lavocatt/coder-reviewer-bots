@@ -55,6 +55,22 @@ MUTANTS = [
         'p.get("ok") is False and p.get("verified") and _case(p) == _case(u)',
         'p.get("ok") is False',
     ),
+    # CI failures named per test
+    (
+        "a failing test changes name when its line moves",
+        'name = re.sub(r"\\s+", " ", VOLATILE.sub("", m.group(1))).strip(" ─-")',
+        'name = re.sub(r"\\s+", " ", m.group(1)).strip(" ─-")',
+    ),
+    (
+        "failures are named per job again (two different e2e failures look the same)",
+        'return {f"{job}: {n}" for n in sorted(names)[:20]} if names else {job}',
+        "return {job}",
+    ),
+    (
+        "the old-code check is silent about what it didn't run",
+        'line = f"Old-code check: not run ({wc.get(\'why\', \'?\')})."',
+        'line = ""',
+    ),
     # the PR's tests must prove something
     (
         "tests that pass on the old code are accepted",

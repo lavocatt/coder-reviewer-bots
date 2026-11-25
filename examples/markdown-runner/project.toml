@@ -74,3 +74,6 @@ debug = '^\+.*(\bfmt\.Print(ln|f)?\(\s*"DEBUG|\bTODO\b|\bFIXME\b|\bXXX\b)'
 # the workflows the bot dispatches on its branches when its push didn't trigger them
 # (each needs `workflow_dispatch:`); their checks are the CI the bot waits for
 workflows = ["ci.yml", "codeql.yml"]
+# regexes whose first group names a failing test in a failed job's log: the bot then tells two
+# different failures of the same job apart (otherwise: the job's name)
+failure_patterns = ['^\s*--- FAIL: (\S+)']

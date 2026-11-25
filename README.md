@@ -42,7 +42,8 @@ team vote ──> coder bot ──> gate ──> CI + CodeQL ──> reviewer bo
 - **Humans**: when the bots agree, the PR is labelled `bot:ready` and a review is requested from
   `BOT_HUMANS`. A collaborator's comment on the PR starts a new coder round.
 - **It stops itself** (`bot:stuck`):
-  - per PR: 3 bot reviews, 4 CI fixes, 5 answers to humans, or the same CI failure twice;
+  - per PR: 3 bot reviews, 4 CI fixes, 5 answers to humans, or the same failing tests twice in a
+    row (named per test with `[ci] failure_patterns`, else per job);
   - cost: $15 a round, $50 per PR.
   Remove the label to grant it the same budget again: that wakes the bot at once.
 
@@ -125,6 +126,10 @@ commands there.
 - **They must fail.** A failure to compile counts, since the tests use what the PR adds.
 - If they all pass, that's a hard finding: *"The PR's tests also pass WITHOUT its code change"*.
 
+Tests that need a running app (e2e, Playwright) can't run there. List them in
+`[paths] ci_only_tests`: CI runs them, and the check covers the rest. Every bot review ends with one
+line saying what the old-code check proved, or why it didn't run, so the human never has to assume.
+
 This is mutation testing applied to the PR. The base branch's code is the mutant, and the PR's
 tests must kill it.
 
@@ -168,10 +173,12 @@ would catch a broken rule. `mutants.py` breaks one rule at a time on purpose, in
 | **SURVIVED** | the tests still pass with the rule broken: a missing test |
 | **STALE** | the code the mutant targets moved: update the mutant |
 
-The 17 mutants cover:
+The 20 mutants cover:
 - the reviewer: an invented output accepted, fewer than 3 probes, colour codes breaking the match,
   wrong probes or unhandled cases not blocking, a rebuttal without evidence;
 - the PR's tests: tests passing on the old code, code changed without tests;
+- CI failures: a test renamed when its line moves, failures named per job again, the old-code
+  check silent about what it didn't run;
 - the bots' limits: protected paths, the dollar cap, the same failure twice, the review budget,
   budgets after `bot:stuck` and after a human review;
 - the human's priority: a human remark first, no bot work on a PR handed over.
@@ -219,6 +226,31 @@ Add `workflow_dispatch:` to every workflow listed in `[ci] workflows`: the bot d
 when its push didn't trigger it.
 
 Check the install with `python3 .bot/test_bot.py`.
+
+**Other languages.** Only the settings change, never `bot.py`:
+- `project.toml`: globs, gate and old-code commands, allowed commands, caches, `try_it`, the
+  failure patterns;
+- `CONVENTIONS.md`;
+- the toolchain step of `bot.yml`;
+- CodeQL's `languages`.
+
+| Example | Status |
+|---|---|
+| [`examples/markdown-runner/`](examples/markdown-runner) | Go CLI, **run for real** (the pilot) |
+| [`examples/typescript-react/`](examples/typescript-react) | React + TypeScript, Jest in the gate, Playwright e2e in CI: **untested sketch** |
+
+The template's comments give `failure_patterns` for Go, Jest, Playwright and pytest. For a
+compiled language, point its package cache at `/tmp/bot-cache` in `[agent.env]`, for example
+`GOMODCACHE` or `-Dmaven.repo.local` in `MAVEN_OPTS`. Every round starts from a fresh worktree.
+
+**Browsers and clusters.** The bots run in a plain CI VM: no browser session of their own, and no
+cluster. UI behaviour is checked in two places:
+- the reviewer's component-test probes;
+- your e2e workflow in CI (Playwright), which the bots wait for and fix like any other check.
+
+E2e against a cluster (an OpenShift console plugin on CRC, say) runs only where your CI already
+provides one. Giving the bots a cluster of their own is possible, but heavy in resources: weigh it
+only once the cheaper layers have shown what they miss.
 
 **2. Two GitHub Apps** (Settings → Developer settings → GitHub Apps → New). No webhook, no callback
 URL. Generate a private key for each, and install each on the repository.

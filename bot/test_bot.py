@@ -183,6 +183,35 @@ _rep = {"protected_touched": [], "code_touched": ["runner/x.go"], "tests_touched
 check("code changed without any test: a hard finding", any("no test" in h for h in bot.hard_findings(_rep)))
 check("code changed with a test: none", bot.hard_findings({**_rep, "tests_touched": ["runner/x_test.go"]}) == [])
 
+# Failures named per test, not per job
+LOG1 = ("2026-11-25T10:00:00.1234567Z === RUN   TestA\n"
+        "2026-11-25T10:00:00.2Z \x1b[31m--- FAIL: TestBreakpoint (0.01s)\x1b[0m\n"
+        "2026-11-25T10:00:00.3Z     --- FAIL: TestBreakpoint/sub_case (0.00s)\n")
+check("failing tests named from a job log (timestamps, colours, durations stripped)",
+      bot.scenarios(LOG1) == {"TestBreakpoint", "TestBreakpoint/sub_case"})
+check("a log naming no test: the job's name", bot.failure_names("integration", "make: *** Error 1") == {"integration"})
+check("…else « job: test »", bot.failure_names("go", LOG1) == {"go: TestBreakpoint", "go: TestBreakpoint/sub_case"})
+bot.FAILURE_PATTERNS.append(bot.re.compile(r"^\s+\d+\) (\[[^\]]+\] › .+?)\s*─*$", bot.re.M))
+PW = lambda line: f"  1) [chromium] › e2e/login.spec.ts:{line}:5 › login works ───────\n"  # noqa: E731
+check("the same e2e test keeps its name when its line moves", bot.scenarios(PW(12)) == bot.scenarios(PW(40))
+      == {"[chromium] › e2e/login.spec.ts › login works"})
+bot.FAILURE_PATTERNS.pop()
+e2e1, e2e2 = ["e2e: [chromium] › a.spec.ts › login"], ["e2e: [chromium] › b.spec.ts › logout"]
+check("the same job failing on a different test after two fixes: progress, fix again",
+      k(pr(ci="failure", failing=e2e2, fix_history=[e2e1, e2e1], fix_rounds=2)) == "fix")
+check("…the same test three times: stuck",
+      k(pr(ci="failure", failing=e2e1, fix_history=[e2e1, e2e1], fix_rounds=2)) == "stuck")
+
+# The old-code check says what it proved, or why it didn't run
+check("old-code line: tests fail on the old code",
+      "✅" in bot.old_code_line({"checked": True, "fail_on_old_code": ["go test"], "pass_on_old_code": []}))
+check("old-code line: tests pass on the old code",
+      "❌" in bot.old_code_line({"checked": True, "fail_on_old_code": [], "pass_on_old_code": ["go test"]}))
+check("old-code line: e2e only, not checkable, said so",
+      "not run (the PR's tests run in CI only" in bot.old_code_line(
+          {"checked": False, "why": "the PR's tests run in CI only (e2e): not checkable here", "ci_only": ["e2e/a.spec.ts"]})
+      and "`e2e/a.spec.ts`" in bot.old_code_line({"checked": False, "why": "x", "ci_only": ["e2e/a.spec.ts"]}))
+
 s, m = bot.parse_final("blah\nSUBJECT: warn on unreachable breakpoint\nSUMMARY: did it.\nmore")
 check("parse_final", s == "warn on unreachable breakpoint" and m.startswith("did it."))
 check("legacy and current markers", bot.MARK.search('<!-- mr-bot {"kind": "a"} -->') and bot.MARK.search('<!-- bot {"kind": "b"} -->'))

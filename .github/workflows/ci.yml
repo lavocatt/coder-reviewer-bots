@@ -26,6 +26,11 @@ jobs:
         run: python3 bot/test_bot.py
       - name: Mutants
         run: python3 bot/mutants.py
+      - name: Every example loads
+        run: |
+          for f in examples/*/project.toml; do
+            BOT_PROJECT="$f" python3 -c 'import sys; sys.path.insert(0, "bot"); import bot' && echo "ok $f"
+          done
       - name: Install into a scratch repository
         run: |
           r=$(mktemp -d) && git init -q "$r"

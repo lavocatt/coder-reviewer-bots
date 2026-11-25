@@ -1,0 +1,44 @@
+# UNTESTED SKETCH: Playwright e2e, one of the CI workflows the bot waits for ([ci] workflows).
+# Playwright's `webServer` (playwright.config.ts) starts the app. A UI that needs a cluster (an
+# OpenShift console plugin) needs that cluster here instead: that is the real cost, not the bot.
+name: e2e
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:   # the bot dispatches it on its branches
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      # Chromium is ~150 MB: cached per Playwright version instead of downloaded every run
+      - id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: browsers
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ steps.pw.outputs.version }}
+      - if: steps.browsers.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - if: steps.browsers.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+      # the `list` reporter prints « 1) [chromium] › file › test »: [ci] failure_patterns reads it
+      - run: npx playwright test --project=chromium --reporter=list
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report
