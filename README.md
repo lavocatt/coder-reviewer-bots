@@ -12,12 +12,37 @@ settings.
 
 ## How it works
 
-```
-team vote ──> coder bot ──> gate ──> CI + CodeQL ──> reviewer bot ──> human
- (label,       (Sonnet,     (your     (your own       (Opus, own       reviews,
-  👍 order)     no token)    checks)   pipeline)       account)         merges
-                  ^            |          | red            | changes      | comment
-                  └────────────┴──────────┴────────────────┴──────────────┘
+```mermaid
+flowchart LR
+    vote["<b>Team vote</b><br/>a collaborator labels bot:todo<br/>👍 orders the queue"]
+    coder["<b>Coder bot</b><br/>Sonnet, headless<br/>no GitHub token"]
+    gate{"<b>Gate</b><br/>your checks, protected paths,<br/>binaries, diff size"}
+    ci{"<b>CI + CodeQL</b><br/>your own pipeline"}
+    reviewer["<b>Reviewer bot</b><br/>Opus, own App<br/>runs probes"]
+    harness{"<b>Harness checks the review</b><br/>do the PR's tests fail on old code?<br/>did the probes really run?"}
+    human["<b>Human</b><br/>reviews, merges"]
+    stuck(["<b>bot:stuck</b><br/>a budget is spent"])
+
+    vote --> coder --> gate
+    gate -- pass --> ci
+    gate -- "fails: back to the same session" --> coder
+    ci -- green --> reviewer
+    ci -- "red: the coder fixes" --> coder
+    reviewer --> harness
+    harness -- "changes requested" --> coder
+    harness -- "bots agree: bot:ready" --> human
+    human -- comment --> coder
+    coder -.-> stuck
+    stuck -. "a human removes the label" .-> coder
+
+    classDef bot fill:#FBEDE4,stroke:#B4501F,stroke-width:2px,color:#000
+    classDef person fill:#E3EDF8,stroke:#2F6FB8,stroke-width:2px,color:#000
+    classDef check fill:#EEF0F3,stroke:#3E4A5A,color:#000
+    classDef halt fill:#FDE2E2,stroke:#B42318,color:#000
+    class coder,reviewer bot
+    class vote,human person
+    class gate,ci,harness check
+    class stuck halt
 ```
 
 - **A collaborator labels an issue `bot:todo`.** The queue is ordered by 👍 votes; two PRs at most
@@ -46,6 +71,24 @@ team vote ──> coder bot ──> gate ──> CI + CodeQL ──> reviewer bo
     row (named per test with `[ci] failure_patterns`, else per job);
   - cost: $15 a round, $50 per PR.
   Remove the label to grant it the same budget again: that wakes the bot at once.
+
+A PR's labels, as the harness moves them:
+
+```mermaid
+stateDiagram-v2
+    state "bot:todo (on the issue)" as todo
+    state "bot:doing" as doing
+    state "bot:ready" as ready
+    state "bot:stuck" as stuck
+    [*] --> todo: a collaborator labels the issue
+    todo --> doing: the coder opens a PR (👍 order, 2 in flight)
+    doing --> doing: gate, CI or reviewer sends it back
+    doing --> ready: the bots agree, a review is requested from BOT_HUMANS
+    ready --> doing: a human comments
+    doing --> stuck: a budget is spent, or the same failure twice
+    stuck --> doing: a human removes the stuck label
+    ready --> [*]: a human merges
+```
 
 The harness ([`bot/bot.py`](bot/bot.py): ~1400 lines of stdlib Python driving the `gh`, `git`, `openssl` and
 `claude` CLIs) is a stateless reconciler. Each
